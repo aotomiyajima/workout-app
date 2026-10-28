@@ -6,6 +6,9 @@
     </head>
     <body>
         <h1>投稿の編集</h1>
+        {% for error in errors %}
+            <p role="alert">{{ error }}</p>
+        {% endfor %}
 
         <form method="POST">
             <div>
@@ -14,7 +17,7 @@
                     type="text"
                     id="workout_name"
                     name="workout_name"
-                    value="{{workout["workout_name"]}}"
+                    value="{{workout['workout_name']}}"
                     required
                 >
             </div>
@@ -32,6 +35,16 @@
                 >
             </div>
 
+            <div>
+                <label for="reps">回数</label>
+                <input type="number" id="reps" name="reps" min="1" step="1"
+                       value="{{ workout.get('reps', '') if workout.get('reps') is not none else '' }}" required>
+            </div>
+            <div>
+                <label for="sets">セット数</label>
+                <input type="number" id="sets" name="sets" min="1" step="1"
+                       value="{{ workout.get('sets', '') if workout.get('sets') is not none else '' }}" required>
+            </div>
             <button type="submit">変更を保存</button>
         </form>
 

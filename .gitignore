@@ -2,4 +2,5 @@ venv/
 __pycache__/
 *.py[cod]
 workouts.db
+workouts.before-reps-sets.db
 .env

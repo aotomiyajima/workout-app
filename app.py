@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, redirect, url_for
 import sqlite3
+import math
 from pathlib import Path
 
 app = Flask(__name__)
@@ -21,9 +22,16 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         workout_name TEXT NOT NULL,
         weight REAL NOT NULL,
+        reps INTEGER,
+        sets INTEGER,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """)
+        # 既存の投稿はNULL（未設定）のまま、新しい列だけ追加する。
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(workouts)")}
+        for column in ("reps", "sets"):
+            if column not in columns:
+                conn.execute(f"ALTER TABLE workouts ADD COLUMN {column} INTEGER")
         conn.commit()
     finally:
         conn.close()
@@ -32,40 +40,53 @@ def init_db():
 init_db()
 
 
+def validate_workout(form):
+    """登録と編集で共通の入力チェック。元の入力はフォーム表示に使う。"""
+    errors = []
+    values = {"workout_name": form.get("workout_name", "").strip()}
+    if not values["workout_name"]:
+        errors.append("種目名を入力してください。")
+    try:
+        values["weight"] = float(form.get("weight", ""))
+        if not math.isfinite(values["weight"]) or values["weight"] < 0:
+            raise ValueError
+    except ValueError:
+        errors.append("重量は0以上の数値で入力してください。")
+
+    for name, label in (("reps", "回数"), ("sets", "セット数")):
+        try:
+            value = int(form.get(name, ""))
+            if value < 1 or value > 9223372036854775807:
+                raise ValueError
+            values[name] = value
+        except ValueError:
+            errors.append(f"{label}は1以上の整数で入力してください（SQLiteで保存できる範囲）。")
+    return values, errors
+
+
 @app.route("/",methods=["GET","POST"])
 def home():
+    form = request.form if request.method == "POST" else {}
+    errors = []
     if request.method == "POST":
-        workout_name = request.form.get("workout_name","").strip()
-        weight = request.form.get("weight","")
-
-        if not workout_name or not weight:
-            return "種目名と重量を入力してください",400
-
-        try:
-            weight_value = float(weight)
-        except ValueError:
-            return "重量は数値で入力してください",400
-
-        if weight_value < 0:
-            return "重量は0以上で入力してください",400
-
-        conn = get_db_connection()
-        try:
-            conn.execute(
-                "INSERT INTO workouts (workout_name,weight)VALUES(?,?)",
-                (workout_name,weight_value)
-            )
-            conn.commit()
-        finally:
-            conn.close()
-            
-        return redirect(url_for("home"))
+        values, errors = validate_workout(form)
+        if not errors:
+            conn = get_db_connection()
+            try:
+                conn.execute(
+                    "INSERT INTO workouts (workout_name,weight,reps,sets) VALUES(?,?,?,?)",
+                    (values["workout_name"], values["weight"], values["reps"], values["sets"])
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            return redirect(url_for("home"))
 
     conn = get_db_connection()
     try:
         workouts = conn.execute(
             """
-            SELECT id,workout_name,weight,created_at
+            SELECT id,workout_name,weight,reps,sets,created_at
             FROM workouts
             ORDER BY id DESC
             """
@@ -73,7 +94,7 @@ def home():
     finally:
         conn.close()
 
-    return render_template("index.html",workouts=workouts)
+    return render_template("index.html",workouts=workouts,form=form,errors=errors), 400 if errors else 200
 
 #削除処理
 @app.route("/delete/<int:workout_id>",methods=["POST"])
@@ -105,29 +126,17 @@ def edit_workout(workout_id):
             return "投稿が見つかりません",404
 
         if request.method == "POST":
-            workout_name = request.form.get(
-                "workout_name",""
-            ).strip()
-            weight = request.form.get("weight","")
-
-            if not workout_name or not weight:
-                return "種目名と重量を入力してください",400
-
-            try:
-                weight_value = float(weight)
-            except ValueError:
-                return "重量は数値で入力してください",400
-
-            if weight_value < 0:
-                return "重量は0以上で入力してください",400
+            values, errors = validate_workout(request.form)
+            if errors:
+                return render_template("edit.html",workout=request.form,errors=errors),400
 
             conn.execute(
                 """
                 UPDATE workouts
-                SET workout_name = ?,weight = ?
+                SET workout_name = ?,weight = ?,reps = ?,sets = ?
                 WHERE id = ?
                 """,
-                (workout_name,weight_value,workout_id)
+                (values["workout_name"],values["weight"],values["reps"],values["sets"],workout_id)
             )
             conn.commit()
 
@@ -138,4 +147,4 @@ def edit_workout(workout_id):
         conn.close()
 
 
-    return render_template("edit.html",workout=workout)
+    return render_template("edit.html",workout=dict(workout))
